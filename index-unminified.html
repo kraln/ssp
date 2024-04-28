@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1.0">
+		<title>Schießstand-Piepser-Bedienpult</title>
+		<style>
+				body {
+					font-family: Arial, sans-serif;
+					margin: 0;
+					padding: 0;
+					background-color: #f4f4f4;
+				}
+
+				header {
+					background-color: #007BFF;
+					color: white;
+					padding: 10px 20px;
+					text-align: center;
+				}
+
+        @keyframes flash {
+            0% { background-color: #ffffff; }
+            50% { background-color: yellow; }
+            100% { background-color: #007bff; }
+        }
+        
+        .flash-once {
+            animation: flash 0.5s;
+        }
+
+				#statusIndicator {
+					margin-top: 5px;
+					font-size: 18px;
+				}
+
+        button {
+            font-size: 16px; padding: 1.3em 3em;
+            color: white; border: none; cursor: pointer;
+        }
+
+        #smBtns button {
+            font-size: 12px; padding 0.6em 1.0em; margin: 2px;
+        }
+		</style>
+	</head>
+	<body>
+		<header id="headerElement">
+			<h1 id="currentPhase">&nbsp;</h1>
+		</header>
+		<section id="mainControl" style="padding: 20px; text-align: center;">
+     <div id="main_controls">
+       <div class="schedule-selector" style="margin-bottom: 20px;">
+          <label for="scheduleDropdown" style="font-size: 16px; margin-right: 10px;">Ablauf Wählen: </label>
+          <select id="scheduleDropdown" style="font-size: 16px; padding: 5px 10px;">
+          </select>
+      </div>
+ 
+         <button id="startButton" style="background-color: #28a745;">Start</button>
+    	  <button id="stopButton" style="background-color: #dc3545;">Stop</button>
+			<div id="statusIndicator">Status: Bereit</div>
+     </div>
+    </section>
+		<section id="liveTiming" style="background-color: #fff; padding: 20px; text-align: center;">
+    	<h2 style="color: #333;">Aktuelle Ablauf</h2>
+    	<p style="font-size: 16px;">Verstrichene Zeit: <span id="timeElapsed" style="font-weight: bold;">00:00:00</span></p>
+    	<p style="font-size: 16px;">Verbleibende Zeit der Phase: <span id="timeRemaining" style="font-weight: bold;">00:00:00</span></p>
+		</section>
+		<section id="scheduleManagement" style="padding: 20px; text-align: center;">
+    	<h2 style="color: #333;">Abläufe Verwalten</h2>
+      <div id="scheduleButtons">
+          <button id="editScheduleButton" class="btn" style="background-color: #007bff; ">Aktuelle Ablauf Bearbeiten</button>
+          <button id="addNewScheduleButton" class="btn" style="background-color: #17a2b8;">Ablauf Hinzufugen</button>
+          <br />
+          <br />
+          <button id="deleteScheduleButton" class="btn" style="background-color: #b81734;">Aktuelle Ablauf Löschen</button>
+      </div>
+    </section>
+
+    <div id="scheduleModal" style="display: none; position: fixed; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5);">
+        <div style="background-color: #fff; margin: 100px auto; padding: 20px; width: 90%; max-width: 600px;">
+            <h2 id="modalTitle">Ablauf Bearbeiten</h2>
+            <form id="scheduleForm">
+                <label for="scheduleName">Ablauf Name:</label>
+                <input type="text" id="scheduleName" name="scheduleName" required style="width: 100%;">
+
+                <h3>Phasen</h3>
+                <div id="phasesContainer"></div>
+                <div id="smBtns">
+                <button type="button" onclick="addPhase()">Phase Hinzufugen</button>
+                <button type="button" onclick="addBeep()">Piep Hinzufugen</button>
+                <button type="button" onclick="addPause()">Pause Hinzufugen</button>
+                </div>
+                <br />
+                <button type="submit">Ablauf Speichern</button>
+            </form>
+                <br />
+                <br />
+            <button onclick="closeModal()">Schließen</button>
+        </div>
+    </div>
+
+	<script type="text/javascript">
+		document.addEventListener('DOMContentLoaded', function() {
+        loadSchedules();
+
+        document.getElementById('startButton').addEventListener('click', startSchedule);
+        document.getElementById('stopButton').addEventListener('click', stopSchedule);
+        document.getElementById('addNewScheduleButton').addEventListener('click', addNewSchedule);
+        document.getElementById('editScheduleButton').addEventListener('click', editCurrentSchedule);
+        document.getElementById('deleteScheduleButton').addEventListener('click', function() {
+            const selectedScheduleName = document.getElementById('scheduleDropdown').value;
+            deleteSchedule(selectedScheduleName);
+        });
+
+        updateStatus('Ready');
+    });
+
+function updateStatus(status) {
+    if (status == "Running")
+    {
+        document.getElementById('startButton').hidden = true;
+        document.getElementById('stopButton').hidden = false; 
+    }
+    else
+    {
+        document.getElementById('startButton').hidden = false;
+        document.getElementById('stopButton').hidden = true;
+    }
+    document.getElementById('statusIndicator').textContent = "";
+}
+
+function startSchedule() {
+    const selectedScheduleName = document.getElementById('scheduleDropdown').value;
+    if (!selectedScheduleName) {
+        alert('Bitte zuerst einen Ablauf wählen.');
+        return;
+    }
+
+    const schedule = findScheduleByName(selectedScheduleName);
+    if (!schedule) {
+        alert('Gewählte Ablauf nicht gefunden!');
+        return;
+    }
+
+    updateStatus('Running');
+    disableControls(true);
+    executeSchedule(schedule.phases);
+}
+
+function findScheduleByName(name) {
+ 		const schedules = loadFromLocalStorage();
+    return schedules.find(schedule => schedule.name === name);
+}
+
+function disableControls(disabled) {
+    document.getElementById('startButton').disabled = disabled;
+    document.getElementById('stopButton').disabled = !disabled;
+    document.getElementById('scheduleDropdown').disabled = disabled;
+}
+
+function stopSchedule() {
+    if (window.activeInterval) {
+        clearInterval(window.activeInterval);
+        window.activeInterval = null;
+    }
+    document.getElementById('timeElapsed').textContent = '00:00:00';
+    document.getElementById('currentPhase').textContent = '\xa0';
+    document.getElementById('timeRemaining').textContent = '00:00:00';
+    updateStatus('Stopped');
+    disableControls(false);
+}
+
+function executeSchedule(phases) {
+    let currentIndex = 0;
+    let startTime = Date.now();
+
+    function nextPhase() {
+        let phaseStartTime = Date.now();
+        if (currentIndex >= phases.length) {
+            finishSchedule();
+            return;
+        }
+
+        const currentPhase = phases[currentIndex++];
+       
+        if (currentPhase.type == "beep")
+        {
+            fetch('/H');
+            setTimeout(function() {
+                fetch('/L');
+            }, currentPhase.duration);
+            nextPhase();
+        } 
+        else if (currentPhase.type == "pause")
+        {
+            setTimeout(function() {
+                nextPhase();
+            }, currentPhase.duration);
+        } 
+        else 
+        {
+            var element = document.getElementById('headerElement');
+            element.classList.add('flash-once');
+
+            setTimeout(function() {
+                element.classList.remove('flash-once');
+            }, 500); 
+
+            document.getElementById('currentPhase').textContent = currentPhase.phase;
+            document.getElementById('timeRemaining').textContent = formatTime(currentPhase.duration);
+
+            window.activeInterval = setInterval(() => {
+                document.getElementById('timeElapsed').textContent = formatTime(Math.round((Date.now()-startTime)));
+                document.getElementById('timeRemaining').textContent = formatTime(Math.round((Date.now()-(phaseStartTime + currentPhase.duration*1000))));
+
+                if ((Date.now() - phaseStartTime)/1000 > currentPhase.duration) {
+                    clearInterval(window.activeInterval);
+                    nextPhase();
+                }
+            }, 13);
+        }
+    }
+    nextPhase();
+}
+
+function formatTime(milliseconds) {
+    if (milliseconds < 0) { milliseconds *= -1; }
+
+    const minutes = Math.floor(milliseconds / 60000);
+    const seconds = Math.floor((milliseconds % 60000) / 1000);
+    const hundredths = Math.floor((milliseconds % 60000000) / 10) % 100;
+    return [minutes, seconds, hundredths].map(unit => unit < 10 ? '0' + unit : unit).join(':');
+}
+
+function finishSchedule() {
+    updateStatus('Complete');
+    document.getElementById('timeRemaining').textContent = formatTime(0);
+    document.getElementById('currentPhase').textContent = '\xa0';
+    disableControls(false);
+}
+
+function addNewSchedule() {
+
+    document.getElementById('scheduleModal').style.display = 'block';
+    document.getElementById('modalTitle').textContent = 'Ablauf Hinzufugen';
+    document.getElementById('scheduleName').value = '';
+    const phasesContainer = document.getElementById('phasesContainer');
+    phasesContainer.innerHTML
+}
+
+function addPhase() {
+    const container = document.getElementById('phasesContainer');
+    const newPhase = document.createElement('div');
+    newPhase.className = 'phaseInput';
+    newPhase.innerHTML = `
+        <label for="phaseName">Phase Name:</label>
+        <input type="text" name="phaseName" required>
+        <input type="hidden" name="phaseType" value="named"/>
+        <label for="phaseDuration">Dauer (Sekunden):</label>
+        <input type="number" name="phaseDuration" min="1" required>
+    `;
+    container.appendChild(newPhase);
+}
+
+function addBeep() {
+    const container = document.getElementById('phasesContainer');
+    const newPhase = document.createElement('div');
+    newPhase.className = 'phaseInput';
+    newPhase.innerHTML = `
+        Piep<input type="hidden" name="phaseName" value="Piep"/>
+        <input type="hidden" name="phaseType" value="beep"/>
+        <label for="phaseDuration">Dauer (Millisekunden):</label>
+        <input type="number" name="phaseDuration" min="10" required>
+    `;
+    container.appendChild(newPhase);
+}
+
+function addPause() {
+    const container = document.getElementById('phasesContainer');
+    const newPhase = document.createElement('div');
+    newPhase.className = 'phaseInput';
+    newPhase.innerHTML = `
+        Pause<input type="hidden" name="phaseName" value="Pause"/>
+        <input type="hidden" name="phaseType" value="pause"/>
+        <label for="phaseDuration">Dauer (Millisekunden):</label>
+        <input type="number" name="phaseDuration" min="10" required>
+    `;
+    container.appendChild(newPhase);
+}
+
+
+document.getElementById('scheduleForm').addEventListener('submit', function(event) {
+    event.preventDefault();
+    saveNewOrEditSchedule();
+});
+
+function editCurrentSchedule() {
+    const selectedScheduleName = document.getElementById('scheduleDropdown').value;
+    const schedule = findScheduleByName(selectedScheduleName);
+    if (!schedule) {
+        alert('Ablauf nicht gefunden!');
+        return;
+    }
+
+    document.getElementById('scheduleModal').style.display = 'block';
+    document.getElementById('modalTitle').textContent = 'Ablauf Bearbeiten';
+    document.getElementById('scheduleName').value = schedule.name;
+    const phasesContainer = document.getElementById('phasesContainer');
+    phasesContainer.innerHTML = ''; 
+
+    schedule.phases.forEach(phase => {
+        const phaseDiv = document.createElement('div');
+        phaseDiv.className = 'phaseInput';
+        let durationMin = phase.type != "named" ? 10 : 1;
+        let durationUnits = phase.type != "named" ? "Millisekunden" : "Sekunden";
+        let firstPart = phase.type == "named" ? `
+             <label for="phaseName">Phase Name:</label>
+            <input type="text" name="phaseName" value="${phase.phase}" required>` : `${phase.phase}<input type="hidden" name="phaseName" value="${phase.phase} />`
+        
+ 
+        phaseDiv.innerHTML = `${firstPart}
+            <input type="hidden" name="phaseType" value="${phase.type}" />
+            <label for="phaseDuration">Dauer (${durationUnits}):</label>
+            <input type="number" name="phaseDuration" value="${phase.duration}" min="${durationMin}" required>
+        `;
+        phasesContainer.appendChild(phaseDiv);
+    });
+}
+
+function saveNewOrEditSchedule() {
+    const form = document.getElementById('scheduleForm');
+    const isEdit = form.classList.contains('edit');
+    const scheduleName = form.scheduleName.value;
+    const phases = Array.from(document.querySelectorAll('.phaseInput')).map(phase => ({
+        phase: phase.querySelector('[name="phaseName"]').value,
+        type: phase.querySelector('[name="phaseType"]').value,
+        duration: parseInt(phase.querySelector('[name="phaseDuration"]').value, 10)
+    }));
+
+ 		const schedules = loadFromLocalStorage();
+    const existingIndex = schedules.findIndex(s => s.name === scheduleName);
+    if (existingIndex > -1) {
+        schedules[existingIndex] = { name: scheduleName, phases: phases }; 
+    } else {
+        schedules.push({ name: scheduleName, phases: phases });
+    }
+    saveToLocalStorage(schedules);
+    closeModal();
+    loadSchedules();
+}
+
+function closeModal() {
+    document.getElementById('scheduleModal').style.display = 'none';
+    document.getElementById('scheduleForm').classList.remove('edit');
+}
+
+function deleteSchedule(scheduleName) {
+    if (!confirm('Sind Sie sicher, dass das "' + scheduleName + '" Ablauf gelöscht sein sollte?')) {
+        return;
+    }
+
+    const schedules = loadFromLocalStorage();
+    const newSchedules = schedules.filter(s => s.name !== scheduleName);
+    saveToLocalStorage(newSchedules);
+    
+    loadSchedules();
+}
+
+function saveToLocalStorage(schedule) {
+		localStorage.setItem('schedules', JSON.stringify(schedule));
+}
+
+function loadSchedules() {
+    const schedules = loadFromLocalStorage();
+    let scheduleDropdown = document.getElementById('scheduleDropdown');
+    scheduleDropdown.innerHTML = ''; 
+    schedules.forEach(schedule => {
+        let option = document.createElement('option');
+        option.value = schedule.name;
+        option.textContent = schedule.name;
+        scheduleDropdown.appendChild(option);
+    });
+}
+
+function loadFromLocalStorage() {
+    return JSON.parse(localStorage.getItem('schedules') || '[]');
+}
+
+   </script>
+	</body>
+</html>
